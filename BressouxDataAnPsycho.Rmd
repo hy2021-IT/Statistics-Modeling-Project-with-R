@@ -1,0 +1,62 @@
+---
+title: "Mutilevel Analysis"
+author: "Hongyi Xia"
+date: '2022-12-02'
+output: html_document
+---
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+BDA <- read.csv('Bressoux Data AnPsycho.csv')
+```
+
+```{r}
+BDA <-
+BDA %>%
+  rename(Studentid = ï..NUMELEVE,
+         Classid = CLASSE2)
+
+
+BDA %>%
+  select(Classid, NBEL2, NBCOURS2, cmultnomb, mfran3, mmath3, msup, mouvr, stdfran3, stdmath3)
+```
+
+Level 1 observation unit - Student, differentiated by and renamed to Studentid (Student id)
+
+Level 2 observation unit - class, differentiated by and renamed to Classid (Class id)
+
+Level 2 variables - Classid (Class id), 
+                  - NBEL2 (Number of students in the class),
+                  - NBCOURS2 (Number of grades in the class),
+                  - cmultnomb (More than two grades in the class (dummy variable)),
+                  - mfran3 (Class average level beginning-of-year score at standardized French test),
+                  - mmath3 (Class average level beginning-of-year score at standardized maths test), 
+                  - msup (Proportion of Liberal profession/executive in the class),
+                  - mouvr (Proportion of laborers in the class),
+                  - stdfran3 (Class standard deviation beginning-of-year score at standardized French test),
+                  - stdmath3 (Class standard deviation beginning-of-year score at standardized math test)
+                  
+Level 1 varialbles - All variables except Level 2 variables
+
+Research Questions: 
+  
+   What is the association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable ouvr) and End-of-year score at standardized maths test (MATH4)
+   
+   Does the association differ based on students' gender (1 = Female, 0 = Male, for variable FILLE)
+   
+Variables of interest : 
+
+    ouvr (Laborer father or not (dummy variable)), FILLE (Girl or not (dummy variable)), MATH4 (End-of-year score at standardized maths test)	
+   
+   Based on the above Research Questions, we claim our fixed effects are ouvr (Laborer father or not (dummy variable)) and FILLE (Girl or not (dummy variable)). Both variables are dummy variables and do not have any meaningful numerical intepretation. The rest of the variables are considered to be random effects since they are the effects we are not interested in studying but whose variability we want to understand, like ANCENS2 (Teacher years of teaching experience), PREEL (Number of years at preelementary school), and etc.
+   
+```{r}
+head(BDA)
+str(BDA)
+```
+   
+   
+

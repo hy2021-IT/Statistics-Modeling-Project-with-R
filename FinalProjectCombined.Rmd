@@ -1,0 +1,580 @@
+---
+title: "Algerian Forest Fires & School Children Performance on Standardized Exams"
+author: "Aureo Zanon, Shengkai Zheng, & Hongyi Xia"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r,include=FALSE}
+##set up
+rm(list = ls())
+library(tidyverse)
+library(data.table)
+library(caret) #For creating confusion matrix and associated probabilities
+library(pROC)
+library(car)
+library(mosaic)
+library(lme4)
+```
+
+# Forest Fires in Algeria
+
+# Introduction 
+
+In the case in which we are looking at the forest fires in Algeria, researchers account for instances in which a new forest fire has occurred in a given region based on the FWI. In turn this means that in an instance in which a fire in a specified area of the region continuously fulfills the FWI criteria for a fire and burns for several days, it is not accounted for in the data. Rather the data aims to classify new blazes occurring in the region on a given day, researchers used this as a facet to eliminate possible correlation in the data (Abid & Izeboudjen 2019). The original data is composed of 18 variables from those 18 variables, we refined to only look at 6 total variables, 1 response with 5 features utilized to predict the odds of the response being equal to 1.
+
+From our refined data set we aim to utilize logistic regression to classify an instance as a forest fire or not based on field readings of temperature, relative humidity, wind speed, total rain and region. The variables are coded as follows:
+
+
+Temp: Temperature in degrees Celsius
+
+RelHumid: Relative Humidity (percentage 0-100)
+
+TotalRain: Total rain fall in millimeters
+
+RegionBejaia: 1 for region is Bejaia, 0 for Sidi-Bel Abbes
+
+WindSpd: Wind Speed in mph
+
+FireNumb: 1 for a forest fire, 0 for no forest fire occurring
+
+It is well understood that in hotter drier days more fires are expected to occur (CIRES 2022). In turn our base model will include those two features and more features will be added in effort to improve the model.
+
+
+Research Questions: 
+
+After accounting for temperature and relative humidity, what features should a model include to best explain predict in instances of new forest fires emerging on a given day in the Algerian Forests in the Bejaia & Sidi-Bel Abbes Regions?
+
+How accurately can we predict the risk of a future fire emerging on a given day in the Algerian Forests in the Bejaia & Sidi-Bel Abbes Regions?
+
+
+# Exploratory Data Analysis
+
+## Prepare Data for Analysis
+```{r}
+a<-"~/Desktop/PSU/SeniorYear/STAT400/STAT400_FinalProj/AlgerianForests.csv"
+forests <- fread(a)
+forests <- as.data.frame(forests)
+#add dates
+forests$date <- as.Date(with(forests,paste(year,month,day,sep="-")),"%Y-%m-%d")
+#code for region indicators
+forests$regionBejai <- ifelse(forests$Region == "Bejaia",1,0)
+#code indicator for fire
+forests$FireNumb <- ifelse(forests$Classes == "fire",1,0)
+#omit unnecessary variables
+forest <- as.data.table(forests)
+a <- c("Temperature","RH","Ws","Rain","regionBejai","FireNumb")
+forestfinal <- forest[,..a]
+#rename cols
+colnames(forestfinal) <- c('Temp','RelHumid','WindSpd','TotalRain','RegionBejaia',"FireNumb")
+#rename data to be used for analysis
+fdata <- forestfinal
+fdata$FireNumb <- as.factor(fdata$FireNumb)
+```
+
+
+The data set was modified creating 2 dummy variables for forest fires where 0 is no fire and 1 represents a fire, and for region being Bejaia where 0 represents a region other than Bejaia and 1 represents Bejaia. Additionally the field reading variables are selected due to their easier interpretability and weight in determining other meterological variables in the data
+
+
+## Summary Stats & Frequency Tables
+```{r}
+#stats for each numerical variable
+a <- favstats(fdata$RelHumid) %>% mutate(id = "RelHumid")
+b <- favstats(fdata$TotalRain)  %>% mutate(id = "TotalRain")
+c <- favstats(fdata$WindSpd)  %>% mutate(id = "WindSpd")
+d <- favstats(fdata$Temp) %>% mutate(id = "Temp")
+e<-rbind(a,b,c,d)
+
+e%>%select(mean,sd,min,Q1,median,Q3,max,id)
+```
+
+
+The mean for relative humidity is 61.93 with a standard deviation of 14.884200, this means that the two regions remain relatively largely humid. The total rain mean is 0.7606557 which demonstrates that the regions do not get very much rain throughout the year. The mean wind speed is 15.5 which shows that the region is not particularly windy. The mean temperature is 32.1721311 which shows that the regions are relatively warm throughout the year.
+
+
+```{r}
+# frequency of fires vs no fire per region
+plyr::count(fdata,"FireNumb")
+Nofire <- fdata %>% select(FireNumb,RegionBejaia) %>% filter(FireNumb==0)
+Fire <- fdata %>% select(FireNumb,RegionBejaia) %>% filter(FireNumb==1)
+Nofirefreq <- plyr::count(Nofire,"RegionBejaia")
+Firefreq <- plyr::count(Fire,"RegionBejaia")
+FreqTable <- inner_join(Nofirefreq,Firefreq, by = "RegionBejaia")%>%rename(FreqNoFire = "freq.x",FreqFire = "freq.y")
+FreqTable
+```
+
+
+The frequency tables demonstrates that in our data set there are 138 instances of a given fire being classified as a new fire. The data also shows from the new fires that occured that most happened in the Sidi-Bel Abbes Region, and proportionally speaking more new fires occur in the Sidi-Bel Abbes Region.
+
+
+
+```{r}
+#stats for numerical variables comparing instances of fire versus non-fire
+favstats(RelHumid ~ FireNumb, data = fdata)
+favstats(TotalRain ~ FireNumb, data = fdata)
+favstats(WindSpd ~ FireNumb, data = fdata)
+favstats(Temp ~ FireNumb, data = fdata)
+```
+
+
+The stats between instances when a  new fire occurs versus when a new fire doesn't occur demonstrtaes that the mean value of temperature is larger for when a new fire occurs, the stats also demonstrate that the total rain and relative humidity have smaller means when a fire occurs, and the stats demonstrate that the difference in wind speed is relatively small between when a fire occurs or does not occur. This demonstrates that there may be some sort of association for a new fire to occur at higher temperatures, smaller total humidity and smaller rain fall.
+
+
+
+## Plots
+```{r}
+#frequency of fire versus no fire for each region
+ggplot(fdata) +
+  aes(x = FireNumb, fill = FireNumb) +
+  geom_bar() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal() +
+  facet_wrap(vars(RegionBejaia))
+```
+
+
+The bar graph demonstrates that most of the fires occur in the Sidi-Bel Abbes, and that from a proportion standpoint more instances of no new emerging fires occur in the Bejaia region. 
+
+
+```{r}
+#scatter for possible multi collinearity
+a1 <- ggplot(fdata) +
+  aes(x = RelHumid, y = TotalRain, colour = FireNumb) +
+  geom_point(shape = "circle", size = 1.5) +
+  scale_color_hue(direction = 1) +
+  theme_minimal()
+a2 <- ggplot(fdata) +
+  aes(x = RelHumid, y = Temp, colour = FireNumb) +
+  geom_point(shape = "circle", size = 1.5) +
+  scale_color_hue(direction = 1) +
+  theme_minimal()
+gridExtra::grid.arrange(a1,a2, ncol = 2)
+```
+
+
+The scatter plots that there might be some slight correlation between the variables relative humidity and total rain, we see a positive trend occur in the scatter plot showcasing a positive correlation, the plot also demonstrates that with higher humidity and total rain less new fires occur. The scatter plot for temperature and relative humidity demonstrates a negative correlation, teh plot also demonstrates that with a larger temperature and less humidity more new fires occur. These instances of correlation between variable could lead to multicollinearity in a model which utilizes both features resulting in a model that does not adequately explain the observed variability.
+
+
+```{r}
+#box plots looking at distributions
+p1 <- ggplot(fdata) +
+  aes(x = RelHumid, y = FireNumb, fill = FireNumb) +
+  geom_boxplot() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal()
+p2 <- ggplot(fdata) +
+  aes(x = TotalRain, y = FireNumb, fill = FireNumb) +
+  geom_boxplot() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal()
+p3 <- ggplot(fdata) +
+  aes(x = WindSpd, y = FireNumb, fill = FireNumb) +
+  geom_boxplot() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal()
+p4 <- ggplot(fdata) +
+  aes(x = Temp, y = FireNumb, fill = FireNumb) +
+  geom_boxplot() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal()
+gridExtra::grid.arrange(p1,p2,p3,p4, ncol = 2)
+```
+
+In looking at the distribution of values for each of the variables in our data set it is noticeable that new fires occur at  higher temperatures, lower rainfall and lower relative humidity. The distribution for wind speed is relatively the same for instances of fire and no fires, this could indicate that wind speed doesn't play a role in new emerging fires btween the two regions.  
+
+
+
+# Models 
+```{r}
+reduced_mod <- glm(FireNumb ~ Temp + RelHumid , family = "binomial", data = fdata)
+full_mod <- glm(FireNumb ~ Temp + RelHumid + WindSpd + TotalRain + RegionBejaia ,family = "binomial",data = fdata)
+#warning indicates that one of these variables explains the variability observed in log odds to a very high degree
+vif(full_mod)
+summary(reduced_mod)
+```
+
+Taking into account the variance inflation factor demonstrated that there were no instances of multicollinearity since no values were above 5. In building a model the initial model only takes into account temperature and relative humidity due to the fact that it is well known that drier and warmer days result in more new fires. The reduced model demonstrates that the features Temp and RelHumid are both significant, with test statistics of 4.982 and -2.317, and associated p-values of 6.29e-07 and 0.02052. In turn this indicates that there is strong evidence to suggest that slopes are not equal to zero and that there is a relationship between the features and the log odds of there being a new emerging fire.
+
+
+
+
+## Confidence Interval for Reduced Model Slope for 
+```{r}
+a<-summary(reduced_mod)
+Temp95 <- exp(a$coefficients[2,1] + c(-1,1)*(qnorm(.975)*a$coefficients[2,2]))
+Temp95
+
+REL95 <- exp(a$coefficients[3,1] + c(-1,1)*(qnorm(.975)*a$coefficients[3,2]))
+REL95
+```
+
+
+The confidence interval demonstrates that we are 95% confident that for every one unite increase in temperature we expect the odds of a new emerging fire to increase by a factor of 1.206239 to 1.538366 when relative humidity is held constant, similarly for every one unit increase in relative humidity we expect the odds of a new emerging fire to decrease by a factor of 0.9426205 to 0.9950823, when temperature is held constant. 
+
+
+## Feature Selection
+```{r}
+#feature selection
+stats::step(reduced_mod, scope = list(lower=reduced_mod, upper=full_mod), data = fdata, direction = 'forward')
+```
+
+
+Utilizing forward selection demonstrates that the best model is the model which takes all the features in the data into account, however in looking at the change in AIC it is noticeable that after adding the total rain variable the drop in AIC is not very large. Although the change in the AIC is not very large the model with all the features should be utilized because there is still a drop in AIC which demonstrates that adding more features doesn't pose a penalty to the model's ability to explain the variability.
+
+
+## Model Comparison
+```{r}
+anova(reduced_mod,full_mod, test = "Chisq")
+```
+
+
+$$H_o: \beta_j = 0$$
+j = WindSpd, TotalRain, RegionBejaia
+
+$$H_a: \beta_j \neq 0$$ 
+for at least one j
+
+
+In comparing the initial model versus the model with more variables we observe that there is evidence to suggest adding features improves the model, meaning the reduced model for emerging fires is improved when more features are added to it. Similarly this also suggests that the slope of at least one of the newly added features is not 0. This is further proved when looking at the test statistic which is 61.174 with and associated p-value of 3.299e-13 which is lower than .05.
+
+
+
+## Model Parameter Interpretation
+
+```{r}
+b <- summary(full_mod)
+exp(b$coefficients)[,1]
+```
+
+
+$$log(\frac{p}{1-p})=-7.88129+0.31418X_{Temp}+(-0.03984)X_{RelHumid}+0.10964X_{Windspd}+(-2.52389)X_{TotalRain}+(-0.54439)X_{RegionBejaia}$$
+
+$$\frac{p}{1-p}=e^{-7.88129+0.31418X_{Temp}+(-0.03984)X_{RelHumid}+0.10964X_{Windspd}+(-2.52389)X_{TotalRain}+(-0.54439)X_{RegionBejaia}}$$
+
+$$p = \frac{e^{-7.88129+0.31418X_{Temp}+(-0.03984)X_{RelHumid}+0.10964X_{Windspd}+(-2.52389)X_{TotalRain}+(-0.54439)X_{RegionBejaia}}}{1+e^{-7.88129+0.31418X_{Temp}+(-0.03984)X_{RelHumid}+0.10964X_{Windspd}+(-2.52389)X_{TotalRain}+(-0.54439)X_{RegionBejaia}}}$$
+
+
+The model has 5 total parameters Temp, RelHumid, WindSpd, TotalRain and RegionBejaia. For every 1 unit increase in temperature the odds of a new fire emerging increases by a factor of ~1.369 while all other variables are held constant. For every one unit increase in relative humidity we expect the odds of a new emerging fire to decrease by a factor of ~.961 when all other variables are held constant. For every one unit increase in wind speed we expect the odds of a new emerging fire to increase by a factor of ~1.1158 when all other variables are held constant. For every increase in total rain fall we expect the odds of a new emerging fire to decrease by a factor of ~.08, when all other variables are held constant. Lastly when the region is Bejaia and all other variables are held constant the odds of a new fire emerging decreases by a factor of 0.5801942547.
+
+
+# Classification Analysis
+```{r}
+#set a threshold
+threshold <- 0.5
+#predict using full model
+pred_prob <- predict(full_mod, newdata = fdata, type = "response")
+fdata$pred_prob <- pred_prob
+pred_10 <- ifelse(pred_prob > threshold, 1, 0)
+#add feature distinguishing fire based on threshold
+fdata$pred_10 <- ifelse(pred_prob > threshold, 1, 0)
+#confusion matrix for forest fire
+confusionMatrix(data = as.factor(pred_10), reference = fdata$FireNumb, positive = "1")
+```
+
+
+The model has an overall accuracy of .8443, which showcases that the model is effective at predicting instances of fires given the features in the data. The sensitivity of the model is .89 and the specificity is .77, this shows that the model is more effective at distinguishing an instance of a new emerging fire rather than an instance where a new fire has not emerged. 
+
+
+```{r}
+test_roc = roc(response = fdata$FireNumb, predictor = pred_prob, plot = TRUE, print.auc = TRUE, legacy.axes=TRUE)
+b<-as.numeric(test_roc$auc)
+b
+```
+
+
+The AUC for the model is .919 which is close to one which shows that the model is effective at classifying instances of new emerging fires, meaning the model is performs better than random chance.
+
+
+# Conclusion
+In conclusion the analysis has demonstrated that including all the features present in the refined data set does create a better model than the base model which only accounts for relative humidity and temperature. This is demonstrated by the usage of forward feature selection in which the best model was found to be the model which includes all the features. In turn this is also further justified when looking at the drop-in-deviance test which demonstrated a test statistic of 61.174 with a associated p-value of 3.299e-13, the p-value was significantly smaller than .05 which leads to support the conclusion that the model is improved upon adding all the features in the data besides relative humidity and temperature.
+
+The analysis also demonstrates that the best model is able to predict the instances of new emerging fires to a better capacity than random chance is capable of doing. The accuracy of the model is roughly .84 which is larger than .5 meaning that the model is able to predict an instance of a new emerging fire to a capacity in which the model is better than utilizing random chance. The ROC curve for the model also demonstrates that the model is good at classification, since the AUC value is .919 which is close to 1, this also supports the claim that the model performs better than random chance.
+
+
+Works Cited
+
+Hamadeh, N., Karouni, A., & Daya, B. (2014). Predicting Forest Fire Hazards Using Data Mining Techniques: Decision Tree and Neural Networks. Advanced Materials Research, 1051, 466–470. https://doi.org/10.4028/www.scientific.net/amr.1051.466
+
+N/A (2022, February 10). Hotter, Drier Nights Mean More Runaway Fires. CIRES. https://cires.colorado.edu/news/hotter-drier-nights-mean-more-runaway-fires
+
+
+# Bressoux Student Performance
+
+
+```{r}
+BDA <- read.csv("BressData.csv")
+
+BDA <-BDA %>%
+  rename(Studentid = NUMELEVE,
+         Classid = CLASSE2,
+         MathScore = MATH4,
+         LabourFather = ouvr,
+         NStudentInClass = NBEL2)
+BDA <- BDA %>%
+  select(Studentid, Classid, MathScore, LabourFather, NStudentInClass)
+BDA$LabourFather<-as.factor(BDA$LabourFather)
+```
+
+
+Variable of Interest:
+
+  Studentid (renamed from NUMELEVE) - Student id (no numerical intepretation, value indicates index of different student)
+  
+  Classid (renamed from CLASSE2) - Class id (no numerical intepretation, value indicates index of different class)
+  
+  MathScore (renamed from MATH4) - End-of-year score at standardized maths test (numerically 
+meaningful, for example, the larger the value, the higher the score)
+  
+  LabourFather (renamed from ouvr) - whether the student's father is laborer or not (1 = yes, 0 = no, with no numerical intepretation)
+  
+  NStudentInClass (renamed from NBEL2) - Number of students in the class (numerically 
+meaningful, for example, the larger the value, the greater the class population)
+  
+  
+Research Questions: 
+  
+   What is the association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable)
+   
+   Does the association differ based on the number of students in the class (NStudentInClass Variable)
+   
+
+Level 1 observation unit - Student, differentiated by Studentid 
+
+Level 2 observation unit - class, differentiated by Classid 
+
+Response variable - MathScore (Level 1 variable but not explanatory variable)
+
+Level 1 explanatory variables -  LabourFather
+
+Level 2 explanatory variables -  NStudentInClass
+
+Fixed effects:
+
+  - LabourFather (1 = yes, 0 = no)
+  
+  - NStudentInClass 
+  
+  
+Random effects: 
+
+  - Classid (Class id)
+
+
+## EDA
+```{r}
+BDA_MATH <- ggplot(data=BDA, mapping=aes(x=MathScore))+
+  geom_bar(binwidth = 2, color="black",fill="white")+
+  ylim(0,30)+
+  labs(x="Students Math Score",
+       y="Number of Students")
+BDA_MATH
+```
+
+
+The graph demonstrates that the scores have been standardized, however the data seems to show to peaks, one peak to the left of zero and one peak to the right of zero.
+
+
+```{r}
+
+BDA_L <- ggplot(data=BDA, mapping=aes(x=LabourFather))+
+  geom_bar(color="black",fill="white")+
+  labs(x="Labour Father or not",
+       y="Frequency")
+  
+BDA_L
+table(BDA$LabourFather)
+```
+
+
+In the data, We have 415 students who doesn't have a labour father and the rest 194 students do have a labour father. 1 is students who have a labour father and 0 is students who does not have a labour father.
+
+
+```{r}
+ggplot(BDA) +
+  aes(x = MathScore, y = LabourFather, fill = LabourFather) +
+  geom_boxplot() +
+  scale_fill_hue(direction = 1) +
+  theme_minimal() +
+  facet_wrap(vars(Classid), scales = "free_x")
+```
+
+
+The box plots for each classroom demonstrates that the distributions for math score vary differently from students with laborer fathers from students without laborer fathers in only a few instances per class. The general trend in each class demonstrates that the distribution of values for math scores for non laborer fathers tends to have larger values than laborer fathers. 
+
+
+```{r}
+BDA %>% 
+  group_by(Studentid) %>%
+  summarize(meanmath = mean(MathScore, na.rm = TRUE),
+          sdmath = sd(MathScore, na.rm = TRUE))
+BDA %>% 
+  group_by(Classid) %>%
+  summarize(meanmath = mean(MathScore, na.rm = TRUE),
+          sdmath = sd(MathScore, na.rm = TRUE))
+```
+Here we summarize mean and sd MathScore by studentid or classid. 
+
+```{r}
+summary(BDA$MathScore)
+```
+Here we generate the five number summary.
+
+```{r}
+ggplot(BDA) +
+  aes(x = NStudentInClass) +
+  geom_histogram(bins = 30L, fill = "#228B22") +
+  theme_minimal()
+favstats(BDA$NStudentInClass)
+```
+
+
+The plot demonstrates that classrooms with 26 students occur at the highest frequency in the data set, the statistics also demonstrate that the mean number of students per class in the data set is ~ 23.
+
+
+## Model Set-up and Parameter Interpretation
+
+$$
+\text{Random Intercepts model (model1)} \\
+\text{Level 1: } Y_{ij} = a_i + \epsilon_{ij} \\  
+\text{Level 2: } a_i = \alpha_0 + \mu_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 ) \\
+u_i ~ \text{~N(0,} \sigma_u^2)
+$$
+
+```{r}
+model1 <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = TRUE)
+summary(model1)
+coef(model1)
+```
+$$ \hat{\alpha}_0 = 0.02535 $$
+The average Math Score across all Students and all Classes is 0.02535
+
+$$ \sigma^2 = 0.89402 $$
+The estimated variance of within Class deviations in the Math Score is 0.89402.
+
+$$ \sigma_u^2 =0.09076 $$
+The estimated variance of between Class deviations in the Math Score is 0.09076.
+
+$$ \hat{\rho} = \frac{\sigma_u^2}{\sigma_u^2 + \sigma^2} =  \frac{0.09076}{0.09076 + 0.89402} = 0.09216272 $$
+9.216272 % of the total variation in Math Score is attributed to differences among the Classes.
+
+
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+\text{Level 1: }Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+\text{Level 2: }a_i = \alpha_0 + \mu_i \\
+b_i = \beta_0 + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 )
+$$
+
+
+```{r}
+model2 <- lmer(MathScore ~ LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model2)
+coef((model2))
+```
+
+$$ \hat{\alpha}_0 = 0.06054 $$
+The average Math Score across all Students and all Classes which their father is non-laborer is 0.06054 
+
+$$ \hat{\beta}_0 = -0.12119 $$
+We expect the Math Score to decrease by 0.12119 which the student's father is laborer instead of non-laborer.
+
+$$ \sigma^2 = 0.892669 $$
+The estimated variance of within Class deviations in the Math Score is 0.892669.
+
+$$ \sigma_u^2 =0.101315 $$
+The estimated variance of between Class deviations in the Math Score which the student's father is non-laborer is 0.101315.
+
+$$ \sigma_v^2 =0.004892 $$
+The estimated variance of changes in the Math Score is 0.004892 when considering laborer father instead of non-laborer father.
+
+$$ \hat{\rho}_{uv} =-1.00 $$
+The estimated correlation between Math Score for Student's father is non-laborer and increase in Math Score for Student's father is laborer is -1.00.
+
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather & NStudentInClass Variables (model3)} \\
+\text{Level 1: }Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+\text{Level 2: }a_i = \alpha_0 + \alpha_1 NStudentInClass_i +  \mu_i \\
+b_i = \beta_0 + \beta_1 NStudentInClass_i + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 )
+$$
+
+
+```{r}
+model3 <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model3)
+coef(model3)
+```
+
+$$ \hat{\alpha}_0 = 0.32971 $$
+The average Math Score across all Students and all Classes which their father is non-laborer together with the mean number of students in the class is 0.32971.
+
+
+$$ \hat{\alpha}_1 = -0.01204 $$
+We expect the Math Score with non-laborer tudent's father to decrease by 0.01204 as the number of students in the class increases by 1.
+
+
+$$ \hat{\beta}_0 = 0.36718 $$
+We expect the Math Score to increase by 0.36718 which the student's father is laborer instead of non-laborer together with the mean number of students in the class.
+
+$$ \hat{\beta}_1 = -0.02072 $$
+We expect the Math Score to decrease by 0.02072 which the student's father is laborer instead of non-laborer and the number of students in the class increases by 1.
+
+$$ \sigma^2 = 0.891827 $$
+The estimated variance of within Class deviations in the Math Score is 0.891827.
+
+$$ \sigma_u^2 =0.102254 $$
+The estimated variance of between Class deviations in the Math Score which the student's father is non-laborer is 0.102254 after controlling for the number of students in the class.
+
+$$ \sigma_v^2 =0.005989 $$
+The estimated variance of changes in the Math Score is 0.005989 when considering laborer father instead of non-laborer father after controlling for the number of students in the class.
+
+$$ \hat{\rho}_{uv} =-1.00 $$
+The estimated correlation between Math Score for Student's father is non-laborer and increase in Math Score for Student's father is laborer is -1.00.
+
+
+## Model Selection and Conclusion
+
+
+$$
+\text{drop in deviance test} \\
+H0 :\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+Ha : \text{Random Intercepts and slopes model based on inclusion of LabourFather &} \\ \text{NStudentInClass Variables (model3) should be used} 
+$$
+
+```{r}
+model2t <- lmer(MathScore ~ LabourFather + (1 + LabourFather | Classid), data = BDA, REML = FALSE)
+model3t <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = FALSE)
+anova(model2t, model3t, test = "chisq")
+```
+
+  Since the p-value = 0.2624 and is greater than 0.05, we do not reject our Null Hypothesis and conclude that the Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2) is preferred over the Random Intercepts and slopes model based on inclusion of LabourFather and NStudentInClass Variables (model3). 
+  
+  Hence, to answer the second part of our research question, assuming that there is somewhat an association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable), there is insufficient evidence to say this association differ based on the number of students in the class (NStudentInClass Variable).
+  
+  After having Model 2 to be picked out from Model 1 and Model 2, We carry on the model selection process to subsequently answer the first part of our research question.
+  
+  
+$$
+\text{Comparison on AIC for the 2 models below} \\
+\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+\text{Random Intercepts model (model1)}
+$$
+  
+```{r}
+model1t <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = FALSE)
+anova(model1t, model2t, test = "chisq")
+```
+
+  AIC for model 1 has a lower AIC value of 1698.7, comparing to model 2's AIC value of 1702.3. Hence, Random Intercepts model (model1) is preferred over Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2). 
+  
+  Hence, to answer the first part of our research question, there is insufficient evidence to conclude that there is an association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable).
+  
+  Since there is insufficient evidence to conclude that there is a such association, it is thus not applicable to find out whether such association differ based on the number of students in the class (NStudentInClass Variable).
+  

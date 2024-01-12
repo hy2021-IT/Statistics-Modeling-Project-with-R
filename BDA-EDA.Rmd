@@ -1,0 +1,194 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+##Library
+```{r}
+rm(list=ls())
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(dplyr)
+library(lme4)
+library(tidyverse)
+```
+
+##Data
+```{r}
+BDA <- read_csv("Bressoux.csv")
+```
+
+
+##code
+```{r}
+BDA <-
+BDA %>%
+  rename(Studentid = NUMELEVE,
+         Classid = CLASSE2,
+         MathScore = MATH4,
+         LabourFather = ouvr,
+         NStudentInClass = NBEL2)
+```
+Variable of Interest:
+
+  Studentid (renamed from NUMELEVE) - Student id (no numerical intepretation, value indicates index of different student)
+  
+  Classid (renamed from CLASSE2) - Class id (no numerical intepretation, value indicates index of different class)
+  
+  MathScore (renamed from MATH4) - End-of-year score at standardized maths test (numerically 
+meaningful, for example, the larger the value, the higher the score)
+  
+  LabourFather (renamed from ouvr) - whether the student's father is laborer or not (1 = yes, 0 = no, with no numerical intepretation)
+  
+  NStudentInClass (renamed from NBEL2) - Number of students in the class (numerically 
+meaningful, for example, the larger the value, the greater the class population)
+  
+  
+Research Questions: 
+  
+   What is the association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable)
+   
+   Does the association differ based on the number of students in the class (NStudentInClass Variable)
+   
+
+Level 1 observation unit - Student, differentiated by Studentid 
+
+Level 2 observation unit - class, differentiated by Classid 
+
+Response variable - MathScore (Level 1 variable but not explanatory variable)
+
+Level 1 explanatory variables -  LabourFather
+
+Level 2 explanatory variables -  NStudentInClass
+
+Fixed effects:
+
+  - LabourFather (1 = yes, 0 = no)
+  
+  - NStudentInClass 
+  
+  
+Random effects: 
+
+  - Classid (Class id)
+  
+```{r}
+BDA_MATH <- ggplot(data=BDA, mapping=aes(x=MathScore))+
+  geom_bar(binwidth = 2, color="black",fill="white")+
+  ylim(0,30)+
+  labs(x="Students Math Score",
+       y="Number of Students")
+BDA_MATH
+```
+```{r}
+BDA_L <- ggplot(data=BDA, mapping=aes(x=LabourFather))+
+  geom_bar(color="black",fill="white")+
+  labs(x="Labour Father or not",
+       y="Frequency")
+BDA_L
+table(BDA$LabourFather)
+```
+In the data, We have 415 students who doesn't have a labour father and the rest 194 students do have a labour father. 
+
+```{r}
+StudentM <- ggplot(data = BDA, mapping = aes(y = Studentid, x = MathScore)) + 
+  geom_boxplot() +
+  labs(x = "MathScore",
+       y = "Students number") + 
+  facet_wrap(  ~ LabourFather)
+print(StudentM + ggtitle("Mathscore for students with or withour a labour father, 0=NO,1=YES"))
+
+ClassM <- ggplot(data = BDA, mapping = aes(y = Classid, x = MathScore)) + 
+  geom_boxplot() +
+  labs(x = "MathScore",
+       y = "Class number") + 
+  facet_wrap(  ~ LabourFather)
+print(ClassM + ggtitle("Mathscore for class with or withour a labour father, 0=NO,1=YES"))
+```
+There is not much difference on this boxplot comparing students father is labour or not.
+
+```{r}
+BDA %>% 
+  group_by(Studentid) %>%
+  summarize(meanmath = mean(MathScore, na.rm = TRUE),
+          sdmath = sd(MathScore, na.rm = TRUE))
+
+BDA %>% 
+  group_by(Classid) %>%
+  summarize(meanmath = mean(MathScore, na.rm = TRUE),
+          sdmath = sd(MathScore, na.rm = TRUE))
+```
+```{r}
+summary(BDA$MathScore)
+```
+
+```{r}
+ggplot(data = BDA, mapping = aes(x = MathScore)) + 
+  geom_histogram(color = "black", fill = "white", binwidth = 2) +
+  labs(x = "MathScores")
+```
+
+## Model Selection
+
+$$
+\text{Random Intercepts model} \\
+Y_{ij} = a_i + \epsilon_{ij} \\  
+a_i = \alpha_0 + \mu_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma_u^2 )
+$$
+
+```{r}
+model1 <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = TRUE)
+summary(model1)
+coef(model1)
+```
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable} \\
+Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+a_i = \alpha_0 + \mu_i \\
+b_i = \beta_0 + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma_u^2 )
+$$
+
+
+```{r}
+model2 <- lmer(MathScore ~ LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model2)
+coef((model2))
+```
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather and NStudentInClass Variables} \\
+Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+a_i = \alpha_0 + \alpha_1 NStudentInClass_i +  \mu_i \\
+b_i = \beta_0 + \beta_1 NStudentInClass_i + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma_u^2 )
+$$
+
+
+```{r}
+model3 <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model3)
+coef(model3)
+```
+
+
+
+```{r}
+model1t <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = FALSE)
+model3t <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = FALSE)
+anova(model1t, model3t, test = "chisq")
+```
+   
+```{r}
+BDA_M4 <- ggplot(data=BDA, mapping=aes(x=MATH4))+
+  geom_bar(binwidth = 2, color="black",fill="white")+
+  ylim(0,30)+
+  labs(x="Negative Affect",
+       y="Number of Musiciams")
+BDA_M4
+```
+
+

@@ -1,0 +1,223 @@
+---
+title: "Stat 400 Multi-level"
+author: "Hongyi Xia"
+date: '2022-12-09'
+output: html_document
+---
+```{r}
+remove(list = ls())
+library(lme4)
+library(tidyverse)
+```
+
+
+## Background Information 
+
+```{r}
+## Load in and Sort out Dataset 
+BDA <- read.csv('Bressoux Data AnPsycho.csv')
+
+BDA <-
+BDA %>%
+  rename(Studentid = ï..NUMELEVE,
+         Classid = CLASSE2,
+         MathScore = MATH4,
+         LabourFather = ouvr,
+         NStudentInClass = NBEL2)
+
+BDA <-
+BDA %>%
+  select(Studentid, Classid, MathScore, LabourFather, NStudentInClass)
+```
+
+
+Variable of Interest:
+
+  Studentid (renamed from NUMELEVE) - Student id (no numerical interpretation, value indicates index of different student)
+  
+  Classid (renamed from CLASSE2) - Class id (no numerical interpretation, value indicates index of different class)
+  
+  MathScore (renamed from MATH4) - End-of-year score at standardized maths test (numerically 
+meaningful, for example, the larger the value, the higher the score)
+  
+  LabourFather (renamed from ouvr) - whether the student's father is laborer or not (1 = yes, 0 = no, with no numerical intepretation)
+  
+  NStudentInClass (renamed from NBEL2) - Number of students in the class (numerically 
+meaningful, for example, the larger the value, the greater the class population)
+  
+  
+Research Questions: 
+  
+   What is the association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable)
+   
+   Does the association differ based on the number of students in the class (NStudentInClass Variable)
+   
+
+Level 1 observation unit - Student, differentiated by Studentid 
+
+Level 2 observation unit - class, differentiated by Classid 
+
+Response variable - MathScore (Level 1 variable but not explanatory variable)
+
+Level 1 explanatory variables -  LabourFather
+
+Level 2 explanatory variables -  NStudentInClass
+
+Fixed effects:
+
+  - LabourFather (1 = yes, 0 = no)
+  
+  - NStudentInClass 
+  
+  
+Random effects: 
+
+  - Classid (Class id)
+
+
+## Model Set-up and Parameter Interpretation
+
+$$
+\text{Random Intercepts model (model1)} \\
+\text{Level 1: } Y_{ij} = a_i + \epsilon_{ij} \\  
+\text{Level 2: } a_i = \alpha_0 + \mu_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 ) \\
+u_i ~ \text{~N(0,} \sigma_u^2)
+$$
+
+```{r}
+model1 <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = TRUE)
+summary(model1)
+coef(model1)
+```
+$$ \hat{\alpha}_0 = 0.02535 $$
+The average Math Score across all Students and all Classes is 0.02535
+
+$$ \sigma^2 = 0.89402 $$
+The estimated variance of within Class deviations in the Math Score is 0.89402.
+
+$$ \sigma_u^2 =0.09076 $$
+The estimated variance of between Class deviations in the Math Score is 0.09076.
+
+$$ \hat{\rho} = \frac{\sigma_u^2}{\sigma_u^2 + \sigma^2} =  \frac{0.09076}{0.09076 + 0.89402} = 0.09216272 $$
+9.216272 % of the total variation in Math Score is attributed to differences among the Classes.
+
+
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+\text{Level 1: }Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+\text{Level 2: }a_i = \alpha_0 + \mu_i \\
+b_i = \beta_0 + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 )
+$$
+
+
+```{r}
+model2 <- lmer(MathScore ~ LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model2)
+coef((model2))
+```
+
+$$ \hat{\alpha}_0 = 0.06054 $$
+The average Math Score across all Students and all Classes which their father is non-laborer is 0.06054 
+
+$$ \hat{\beta}_0 = -0.12119 $$
+We expect the Math Score to decrease by 0.12119 which the student's father is laborer instead of non-laborer.
+
+$$ \sigma^2 = 0.892669 $$
+The estimated variance of within Class deviations in the Math Score is 0.892669.
+
+$$ \sigma_u^2 =0.101315 $$
+The estimated variance of between Class deviations in the Math Score which the student's father is non-laborer is 0.101315.
+
+$$ \sigma_v^2 =0.004892 $$
+The estimated variance of changes in the Math Score is 0.004892 when considering laborer father instead of non-laborer father.
+
+$$ \hat{\rho}_{uv} =-1.00 $$
+The estimated correlation between Math Score for Student's father is non-laborer and increase in Math Score for Student's father is laborer is -1.00.
+
+
+$$
+\text{Random Intercepts and slopes model based on inclusion of LabourFather & NStudentInClass Variables (model3)} \\
+\text{Level 1: }Y_{ij} = a_i + b_i LabourFather_i + \epsilon_{ij} \\
+\text{Level 2: }a_i = \alpha_0 + \alpha_1 NStudentInClass_i +  \mu_i \\
+b_i = \beta_0 + \beta_1 NStudentInClass_i + v_i \\
+\text{where } \epsilon_{ij} \text{~N(0,} \sigma^2 )
+$$
+
+
+```{r}
+model3 <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = TRUE)
+summary(model3)
+coef(model3)
+```
+
+$$ \hat{\alpha}_0 = 0.32971 $$
+The average Math Score across all Students and all Classes which their father is non-laborer together with the mean number of students in the class is 0.32971.
+
+
+$$ \hat{\alpha}_1 = -0.01204 $$
+We expect the Math Score with non-laborer tudent's father to decrease by 0.01204 as the number of students in the class increases by 1.
+
+
+$$ \hat{\beta}_0 = 0.36718 $$
+We expect the Math Score to increase by 0.36718 which the student's father is laborer instead of non-laborer together with the mean number of students in the class.
+
+$$ \hat{\beta}_1 = -0.02072 $$
+We expect the Math Score to decrease by 0.02072 which the student's father is laborer instead of non-laborer and the number of students in the class increases by 1.
+
+$$ \sigma^2 = 0.891827 $$
+The estimated variance of within Class deviations in the Math Score is 0.891827.
+
+$$ \sigma_u^2 =0.102254 $$
+The estimated variance of between Class deviations in the Math Score which the student's father is non-laborer is 0.102254 after controlling for the number of students in the class.
+
+$$ \sigma_v^2 =0.005989 $$
+The estimated variance of changes in the Math Score is 0.005989 when considering laborer father instead of non-laborer father after controlling for the number of students in the class.
+
+$$ \hat{\rho}_{uv} =-1.00 $$
+The estimated correlation between Math Score for Student's father is non-laborer and increase in Math Score for Student's father is laborer is -1.00.
+
+
+## Model Selection and Conclusion
+
+
+$$
+\text{drop in deviance test} \\
+H0 :\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+Ha : \text{Random Intercepts and slopes model based on inclusion of LabourFather &} \\ \text{NStudentInClass Variables (model3) should be used} 
+$$
+
+```{r}
+model2t <- lmer(MathScore ~ LabourFather + (1 + LabourFather | Classid), data = BDA, REML = FALSE)
+model3t <- lmer(MathScore ~ NStudentInClass + LabourFather + NStudentInClass:LabourFather + (1 + LabourFather | Classid), data = BDA, REML = FALSE)
+
+anova(model2t, model3t, test = "chisq")
+```
+
+  Since the p-value = 0.2624 and is greater than 0.05, we do not reject our Null Hypothesis and conclude that the Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2) is preferred over the Random Intercepts and slopes model based on inclusion of LabourFather and NStudentInClass Variables (model3). 
+  
+  Hence, to answer the second part of our research question, assuming that there is somewhat an association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable), there is insufficient evidence to say this association differ based on the number of students in the class (NStudentInClass Variable).
+  
+  After having Model 2 to be picked out from Model 1 and Model 2, We carry on the model selection process to subsequently answer the first part of our research question.
+  
+  
+$$
+\text{Comparison on AIC for the 2 models below} \\
+\text{Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2)} \\
+\text{Random Intercepts model (model1)}
+$$
+  
+```{r}
+model1t <- lmer(MathScore ~ 1 + (1 | Classid), data = BDA, REML = FALSE)
+
+anova(model1t, model2t, test = "chisq")
+```
+
+  AIC for model 1 has a lower AIC value of 1698.7, comparing to model 2's AIC value of 1702.3. Hence, Random Intercepts model (model1) is preferred over Random Intercepts and slopes model based on inclusion of LabourFather Variable (model2). 
+  
+  Hence, to answer the first part of our research question, there is insufficient evidence to conclude that there is an association between whether the student's father is laborer or not (1 = yes, 0 = no, for variable LabourFather) and End-of-year score at standardized maths test (MathScore Variable).
+  
+  Since there is insufficient evidence to conclude that there is a such association, it is thus not applicable to find out whether such association differ based on the number of students in the class (NStudentInClass Variable).
+  
